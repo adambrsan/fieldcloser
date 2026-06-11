@@ -48,17 +48,25 @@ export default function App() {
 
   async function loadLeads() {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("leads")
-      .select("*")
-      .order("lead_num", { ascending: true })
-      .limit(2000);
-    if (error) {
-      console.error(error);
-      showToast("Error loading leads: " + error.message);
-    } else {
-      setLeads(data.map(l => ({ ...l, notesList: [], appointment: null, reminder: null, sold: null })));
+    const pageSize = 1000;
+    let allRows = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("leads")
+        .select("*")
+        .order("lead_num", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) {
+        console.error(error);
+        showToast("Error loading leads: " + error.message);
+        break;
+      }
+      allRows = allRows.concat(data);
+      if (data.length < pageSize) break;
+      from += pageSize;
     }
+    setLeads(allRows.map(l => ({ ...l, notesList: [], appointment: null, reminder: null, sold: null })));
     setLoading(false);
   }
 
