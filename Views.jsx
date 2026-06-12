@@ -1,4 +1,4 @@
-import { fmtDateTime, getDateRange, parsePremium, exportSalesCSV } from "./helpers.jsx";
+import { fmtDateTime, getDateRange, parsePremium, exportSalesCSV, IRS_MILEAGE_RATE, exportTripsCSV } from "./helpers.jsx";
 import { useState, useMemo } from "react";
 
 // ════════════════════════════════════════════════════════════════
@@ -411,6 +411,137 @@ export function ProductionView({ allSales, goal, setGoal, selectLead }) {
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">{s.carrier} · {s.coverage}</div>
                   <div className="text-xs text-gray-400 mt-0.5">{new Date(s.sold_date).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// MILEAGE VIEW
+// ════════════════════════════════════════════════════════════════
+
+export function MileageView({
+  trips, tracking, trackedMiles, onStartTrip, onStopTrip,
+  manualMiles, setManualMiles, manualPurpose, setManualPurpose, onAddManual,
+  onDeleteTrip, gpsError
+}) {
+  const [period, setPeriod] = useState("week");
+
+  const filteredTrips = useMemo(() => {
+    const { start, end } = getDateRange(period);
+    return trips.filter(t => {
+      const d = new Date(t.trip_date + "T00:00:00");
+      return d >= start && d <= end;
+    });
+  }, [trips, period]);
+
+  const totalMiles = filteredTrips.reduce((sum, t) => sum + Number(t.miles), 0);
+  const totalDeduction = totalMiles * IRS_MILEAGE_RATE;
+
+  const periods = [
+    { key: "today", label: "Today" },
+    { key: "week", label: "This Week" },
+    { key: "month", label: "This Month" },
+    { key: "all", label: "All Time" },
+  ];
+
+  return (
+    <div className="flex flex-col h-full bg-gray-50">
+      <div className="px-4 py-3 bg-white border-b border-gray-200 flex-shrink-0">
+        <div className="font-bold text-gray-900 text-lg mb-2">🚙 Mileage</div>
+        <div className="flex gap-1.5 flex-wrap">
+          {periods.map(p => (
+            <button key={p.key} onClick={() => setPeriod(p.key)}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${period === p.key ? "bg-slate-700 text-white border-slate-700" : "bg-white text-gray-500 border-gray-300"}`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 pb-20 space-y-3">
+        {/* GPS Tracker */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="font-semibold text-gray-700 text-sm mb-3">GPS Trip Tracker</div>
+          {tracking ? (
+            <div className="space-y-2">
+              <div className="bg-blue-50 rounded-xl p-4 text-center">
+                <div className="text-3xl font-bold text-blue-600">{trackedMiles.toFixed(2)}</div>
+                <div className="text-xs text-blue-600 mt-1">miles tracked · recording…</div>
+              </div>
+              <button onClick={onStopTrip}
+                className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold text-base active:bg-red-600">
+                ⏹ Stop & Save Trip
+              </button>
+            </div>
+          ) : (
+            <button onClick={onStartTrip}
+              className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold text-base active:bg-blue-700">
+              ▶️ Start Drive
+            </button>
+          )}
+          {gpsError && <div className="text-xs text-red-500 mt-2">{gpsError}</div>}
+        </div>
+
+        {/* Manual Entry */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="font-semibold text-gray-700 text-sm mb-3">Add Trip Manually</div>
+          <div className="flex gap-2 mb-2">
+            <input type="number" inputMode="decimal" value={manualMiles} onChange={e => setManualMiles(e.target.value)}
+              placeholder="Miles"
+              className="w-24 border border-gray-300 rounded-xl px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-400" />
+            <input value={manualPurpose} onChange={e => setManualPurpose(e.target.value)}
+              placeholder="Purpose (e.g. Route to Joliet)"
+              className="flex-1 border border-gray-300 rounded-xl px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+          <button onClick={onAddManual} disabled={!manualMiles}
+            className="w-full bg-gray-100 disabled:opacity-40 text-gray-700 py-2.5 rounded-xl font-semibold text-sm active:bg-gray-200">
+            Add Trip
+          </button>
+        </div>
+
+        {/* Totals */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="grid grid-cols-2 gap-3 text-center">
+            <div className="bg-indigo-50 rounded-xl py-3">
+              <div className="text-2xl font-bold text-indigo-600">{totalMiles.toFixed(1)}</div>
+              <div className="text-xs text-indigo-600 mt-0.5">Miles</div>
+            </div>
+            <div className="bg-emerald-50 rounded-xl py-3">
+              <div className="text-2xl font-bold text-emerald-600">${totalDeduction.toFixed(2)}</div>
+              <div className="text-xs text-emerald-600 mt-0.5">Est. Deduction</div>
+            </div>
+          </div>
+          <div className="text-xs text-gray-400 text-center mt-2">at IRS rate of ${IRS_MILEAGE_RATE.toFixed(2)}/mile</div>
+        </div>
+
+        {/* Trip log */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-semibold text-gray-700 text-sm">Trip Log</div>
+            <button onClick={() => exportTripsCSV(filteredTrips)} disabled={filteredTrips.length === 0}
+              className="text-xs bg-gray-100 disabled:opacity-40 text-gray-600 px-3 py-1.5 rounded-lg font-medium active:bg-gray-200">
+              📥 Export CSV
+            </button>
+          </div>
+          {filteredTrips.length === 0 ? (
+            <div className="text-xs text-gray-400">No trips logged in this period</div>
+          ) : (
+            <div className="space-y-2">
+              {filteredTrips.map(t => (
+                <div key={t.id} className="border border-gray-100 rounded-xl p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium text-gray-800 text-sm">{Number(t.miles).toFixed(1)} mi {t.source === "gps" && <span className="text-xs text-blue-500">📍 GPS</span>}</div>
+                    <div className="text-xs text-gray-500 truncate">{t.purpose || "No purpose noted"}</div>
+                    <div className="text-xs text-gray-400">{new Date(t.trip_date + "T00:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}</div>
+                  </div>
+                  <button onClick={() => onDeleteTrip(t.id)}
+                    className="flex-shrink-0 w-8 h-8 bg-red-50 text-red-500 rounded-lg active:bg-red-100 flex items-center justify-center text-sm">✕</button>
                 </div>
               ))}
             </div>

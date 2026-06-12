@@ -171,6 +171,42 @@ export function digitsOnly(phone) {
   return (phone || "").replace(/\D/g, "");
 }
 
+// ── IRS standard mileage rate (2026) ──────────────────────────────
+export const IRS_MILEAGE_RATE = 0.70; // $/mile - update annually
+
+export function haversineMiles(a, b) {
+  const R = 3958.8;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h));
+}
+
+export function exportTripsCSV(trips) {
+  const header = ["Date","Miles","Purpose","Source","Deduction ($)"].join(",");
+  const rows = trips.map(t => [
+    t.trip_date,
+    t.miles.toFixed(1),
+    `"${(t.purpose || "").replace(/"/g, '""')}"`,
+    t.source,
+    (t.miles * IRS_MILEAGE_RATE).toFixed(2),
+  ].join(","));
+  const csv = [header, ...rows].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const stamp = new Date().toISOString().split("T")[0];
+  a.download = `FieldCloser_Mileage_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
 // ── Parse premium string to monthly numeric value ─────────────────
 export function parsePremium(premiumStr) {
   if (!premiumStr) return 0;
