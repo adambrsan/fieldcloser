@@ -41,7 +41,7 @@ export function downloadICS({ title, description, location, start, end }) {
   const ics = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//FieldCloser//EN",
+    "PRODID:-//UltimateSalesman//EN",
     "BEGIN:VEVENT",
     `UID:${Date.now()}@fieldcloser`,
     `DTSTAMP:${fmt(new Date())}`,
@@ -92,7 +92,7 @@ export function exportLeadsCSV(leads) {
   const a = document.createElement("a");
   a.href = url;
   const stamp = new Date().toISOString().split("T")[0];
-  a.download = `FieldCloser_Leads_${stamp}.csv`;
+  a.download = `UltimateSalesman_Leads_${stamp}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -199,7 +199,7 @@ export function exportTripsCSV(trips) {
   const a = document.createElement("a");
   a.href = url;
   const stamp = new Date().toISOString().split("T")[0];
-  a.download = `FieldCloser_Mileage_${stamp}.csv`;
+  a.download = `UltimateSalesman_Mileage_${stamp}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -255,7 +255,7 @@ export function exportSalesCSV(sales) {
   const a = document.createElement("a");
   a.href = url;
   const stamp = new Date().toISOString().split("T")[0];
-  a.download = `FieldCloser_Production_${stamp}.csv`;
+  a.download = `UltimateSalesman_Production_${stamp}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
