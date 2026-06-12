@@ -1,4 +1,5 @@
-import { fmtDateTime } from "./helpers.jsx";
+import { fmtDateTime, getDateRange, parsePremium, exportSalesCSV } from "./helpers.jsx";
+import { useState, useMemo } from "react";
 
 // ════════════════════════════════════════════════════════════════
 // SCHEDULE VIEW
@@ -88,7 +89,7 @@ export function ActivityView({ todayStats, log }) {
 // ════════════════════════════════════════════════════════════════
 // ROUTE VIEW
 // ════════════════════════════════════════════════════════════════
-export function RouteView({ routeLeads, removeFromRoute, moveRouteItem, clearRoute, startRoute, onClose, selectLead }) {
+export function RouteView({ routeLeads, removeFromRoute, moveRouteItem, clearRoute, startRoute, onClose, selectLead, startAddress, setStartAddress, onOptimize, optimizing }) {
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <div className="px-4 py-3 bg-white border-b border-gray-200 flex-shrink-0">
@@ -102,6 +103,18 @@ export function RouteView({ routeLeads, removeFromRoute, moveRouteItem, clearRou
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 pb-24">
+        {/* Starting point + optimize */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-3 mb-3">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Starting Point (optional)</div>
+          <input value={startAddress} onChange={e => setStartAddress(e.target.value)}
+            placeholder="e.g. 123 Main St, Joliet, IL"
+            className="w-full border border-gray-300 rounded-xl px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-400 mb-2" />
+          <button onClick={onOptimize} disabled={optimizing || routeLeads.length < 2}
+            className="w-full bg-indigo-600 disabled:opacity-40 text-white py-3 rounded-xl font-semibold text-sm active:bg-indigo-700">
+            {optimizing ? "Optimizing…" : "🧭 Optimize Route Order"}
+          </button>
+        </div>
+
         {routeLeads.length === 0 ? (
           <div className="text-center text-gray-400 py-10 text-sm">
             No stops in your route yet.<br />Go back and tap "+ Route" on leads.
@@ -241,6 +254,165 @@ export function ImportModal({ importText, setImportText, importPreview, onPrevie
                 className="w-full bg-blue-600 text-white py-3 font-semibold text-base active:bg-blue-700">
                 Import {importPreview.length} Leads
               </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRODUCTION VIEW
+// ════════════════════════════════════════════════════════════════
+
+export function ProductionView({ allSales, goal, setGoal, selectLead }) {
+  const [period, setPeriod] = useState("week");
+
+  const filteredSales = useMemo(() => {
+    const { start, end } = getDateRange(period);
+    return allSales.filter(s => {
+      const d = new Date(s.sold_date);
+      return d >= start && d <= end;
+    });
+  }, [allSales, period]);
+
+  const totalPremium = useMemo(() => {
+    return filteredSales.reduce((sum, s) => sum + parsePremium(s.premium), 0);
+  }, [filteredSales]);
+
+  const carrierBreakdown = useMemo(() => {
+    const map = {};
+    filteredSales.forEach(s => {
+      const carrier = s.carrier || "Unknown";
+      const premium = parsePremium(s.premium);
+      if (!map[carrier]) map[carrier] = { count: 0, premium: 0 };
+      map[carrier].count += 1;
+      map[carrier].premium += premium;
+    });
+    return Object.entries(map).sort((a, b) => b[1].premium - a[1].premium);
+  }, [filteredSales]);
+
+  const maxCarrierPremium = Math.max(1, ...carrierBreakdown.map(([, v]) => v.premium));
+
+  const goalProgress = goal > 0 ? Math.min(100, (totalPremium / goal) * 100) : 0;
+
+  const periods = [
+    { key: "today", label: "Today" },
+    { key: "week", label: "This Week" },
+    { key: "month", label: "This Month" },
+    { key: "all", label: "All Time" },
+  ];
+
+  return (
+    <div className="flex flex-col h-full bg-gray-50">
+      <div className="px-4 py-3 bg-white border-b border-gray-200 flex-shrink-0">
+        <div className="font-bold text-gray-900 text-lg mb-2">📈 Production</div>
+        <div className="flex gap-1.5 flex-wrap">
+          {periods.map(p => (
+            <button key={p.key} onClick={() => setPeriod(p.key)}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${period === p.key ? "bg-slate-700 text-white border-slate-700" : "bg-white text-gray-500 border-gray-300"}`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 pb-20 space-y-3">
+        {/* Totals */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="grid grid-cols-2 gap-3 text-center">
+            <div className="bg-emerald-50 rounded-xl py-3">
+              <div className="text-2xl font-bold text-emerald-600">${totalPremium.toFixed(2)}</div>
+              <div className="text-xs text-emerald-600 mt-0.5">Monthly Premium</div>
+            </div>
+            <div className="bg-blue-50 rounded-xl py-3">
+              <div className="text-2xl font-bold text-blue-600">{filteredSales.length}</div>
+              <div className="text-xs text-blue-600 mt-0.5">Policies</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Goal Tracker */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-semibold text-gray-700 text-sm">🎯 Weekly Goal</div>
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-gray-400">$</span>
+              <input
+                type="number"
+                value={goal}
+                onChange={e => setGoal(Number(e.target.value) || 0)}
+                className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              <span className="text-xs text-gray-400">/mo</span>
+            </div>
+          </div>
+          {goal > 0 ? (
+            <>
+              <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+                <div className="bg-gradient-to-r from-blue-500 to-emerald-500 h-3 rounded-full transition-all"
+                  style={{ width: `${goalProgress}%` }} />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500 mt-1.5">
+                <span>${totalPremium.toFixed(2)} of ${goal.toFixed(2)}</span>
+                <span>{goalProgress.toFixed(0)}%</span>
+              </div>
+              {period !== "week" && (
+                <div className="text-xs text-amber-500 mt-1">Goal compares to "This Week" data — switch period to see progress accurately</div>
+              )}
+            </>
+          ) : (
+            <div className="text-xs text-gray-400">Set a weekly premium goal to track progress</div>
+          )}
+        </div>
+
+        {/* Carrier Breakdown */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="font-semibold text-gray-700 text-sm mb-3">Carrier Breakdown</div>
+          {carrierBreakdown.length === 0 ? (
+            <div className="text-xs text-gray-400">No sales in this period</div>
+          ) : (
+            <div className="space-y-2.5">
+              {carrierBreakdown.map(([carrier, v]) => (
+                <div key={carrier}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="font-medium text-gray-700">{carrier}</span>
+                    <span className="text-gray-500">{v.count} policy{v.count !== 1 ? "ies" : ""} · ${v.premium.toFixed(2)}/mo</span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                    <div className="bg-indigo-500 h-2 rounded-full" style={{ width: `${(v.premium / maxCarrierPremium) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Sales list */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-semibold text-gray-700 text-sm">Policies</div>
+            <button onClick={() => exportSalesCSV(filteredSales)} disabled={filteredSales.length === 0}
+              className="text-xs bg-gray-100 disabled:opacity-40 text-gray-600 px-3 py-1.5 rounded-lg font-medium active:bg-gray-200">
+              📥 Export CSV
+            </button>
+          </div>
+          {filteredSales.length === 0 ? (
+            <div className="text-xs text-gray-400">No policies sold in this period</div>
+          ) : (
+            <div className="space-y-2">
+              {filteredSales.map(s => (
+                <div key={s.id} onClick={() => s.lead && selectLead(s.lead)}
+                  className="border border-gray-100 rounded-xl p-3 active:bg-gray-50">
+                  <div className="flex justify-between items-start">
+                    <div className="font-medium text-gray-800 text-sm">{s.lead ? `${s.lead.first_name} ${s.lead.last_name}` : "Unknown lead"}</div>
+                    <div className="text-emerald-600 font-semibold text-sm">{s.premium}</div>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">{s.carrier} · {s.coverage}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{new Date(s.sold_date).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}</div>
+                </div>
+              ))}
             </div>
           )}
         </div>

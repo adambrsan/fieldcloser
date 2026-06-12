@@ -170,3 +170,118 @@ export function fmtDateTime(dateStr, timeStr) {
 export function digitsOnly(phone) {
   return (phone || "").replace(/\D/g, "");
 }
+
+// ── Parse premium string to monthly numeric value ─────────────────
+export function parsePremium(premiumStr) {
+  if (!premiumStr) return 0;
+  const cleaned = String(premiumStr).replace(/[^0-9.]/g, "");
+  const num = parseFloat(cleaned);
+  if (isNaN(num)) return 0;
+  // If string mentions "year" or "annual", convert to monthly
+  if (/year|annual|yr/i.test(premiumStr)) return num / 12;
+  return num;
+}
+
+// ── Date range helpers ────────────────────────────────────────────
+export function getDateRange(period) {
+  const now = new Date();
+  const start = new Date(now);
+  if (period === "today") {
+    start.setHours(0,0,0,0);
+  } else if (period === "week") {
+    const day = start.getDay();
+    const diff = day === 0 ? 6 : day - 1; // Monday start
+    start.setDate(start.getDate() - diff);
+    start.setHours(0,0,0,0);
+  } else if (period === "month") {
+    start.setDate(1);
+    start.setHours(0,0,0,0);
+  } else {
+    start.setFullYear(2000);
+  }
+  return { start, end: now };
+}
+
+// ── Sales CSV export ───────────────────────────────────────────────
+export function exportSalesCSV(sales) {
+  const header = ["Date","Lead #","Name","Carrier","Coverage","Premium"].join(",");
+  const rows = sales.map(s => [
+    new Date(s.sold_date).toLocaleDateString(),
+    s.lead?.lead_num ?? "",
+    `"${(s.lead?.first_name || "")} ${(s.lead?.last_name || "")}"`,
+    `"${s.carrier || ""}"`,
+    `"${s.coverage || ""}"`,
+    `"${s.premium || ""}"`,
+  ].join(","));
+  const csv = [header, ...rows].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const stamp = new Date().toISOString().split("T")[0];
+  a.download = `FieldCloser_Production_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
+// ── Geocoding via Nominatim (OpenStreetMap, free, no API key) ────
+const geocodeCache = new Map();
+
+export async function geocodeAddress(address) {
+  if (geocodeCache.has(address)) return geocodeCache.get(address);
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`;
+    const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+    const data = await res.json();
+    if (data && data.length > 0) {
+      const coords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      geocodeCache.set(address, coords);
+      return coords;
+    }
+  } catch (e) {
+    console.error("Geocode error for", address, e);
+  }
+  geocodeCache.set(address, null);
+  return null;
+}
+
+function haversineDistance(a, b) {
+  const R = 3958.8; // miles
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h));
+}
+
+// Nearest-neighbor route optimization.
+// stops: array of { id, address, coords }
+// startCoords: { lat, lng } or null
+// Returns optimized array of ids in visiting order.
+export function optimizeRouteOrder(stops, startCoords) {
+  const remaining = stops.filter(s => s.coords).map(s => ({ ...s }));
+  const unlocatable = stops.filter(s => !s.coords).map(s => s.id);
+  const ordered = [];
+
+  let current = startCoords;
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    if (current) {
+      let bestDist = Infinity;
+      remaining.forEach((s, i) => {
+        const d = haversineDistance(current, s.coords);
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+      });
+    }
+    const next = remaining.splice(bestIdx, 1)[0];
+    ordered.push(next.id);
+    current = next.coords;
+  }
+
+  return [...ordered, ...unlocatable];
+}
+
