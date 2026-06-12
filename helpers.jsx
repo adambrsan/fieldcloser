@@ -171,6 +171,62 @@ export function digitsOnly(phone) {
   return (phone || "").replace(/\D/g, "");
 }
 
+// ── Parse premium string to monthly numeric value ─────────────────
+export function parsePremium(premiumStr) {
+  if (!premiumStr) return 0;
+  const cleaned = String(premiumStr).replace(/[^0-9.]/g, "");
+  const num = parseFloat(cleaned);
+  if (isNaN(num)) return 0;
+  // If string mentions "year" or "annual", convert to monthly
+  if (/year|annual|yr/i.test(premiumStr)) return num / 12;
+  return num;
+}
+
+// ── Date range helpers ────────────────────────────────────────────
+export function getDateRange(period) {
+  const now = new Date();
+  const start = new Date(now);
+  if (period === "today") {
+    start.setHours(0,0,0,0);
+  } else if (period === "week") {
+    const day = start.getDay();
+    const diff = day === 0 ? 6 : day - 1; // Monday start
+    start.setDate(start.getDate() - diff);
+    start.setHours(0,0,0,0);
+  } else if (period === "month") {
+    start.setDate(1);
+    start.setHours(0,0,0,0);
+  } else {
+    start.setFullYear(2000);
+  }
+  return { start, end: now };
+}
+
+// ── Sales CSV export ───────────────────────────────────────────────
+export function exportSalesCSV(sales) {
+  const header = ["Date","Lead #","Name","Carrier","Coverage","Premium"].join(",");
+  const rows = sales.map(s => [
+    new Date(s.sold_date).toLocaleDateString(),
+    s.lead?.lead_num ?? "",
+    `"${(s.lead?.first_name || "")} ${(s.lead?.last_name || "")}"`,
+    `"${s.carrier || ""}"`,
+    `"${s.coverage || ""}"`,
+    `"${s.premium || ""}"`,
+  ].join(","));
+  const csv = [header, ...rows].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const stamp = new Date().toISOString().split("T")[0];
+  a.download = `FieldCloser_Production_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
 // ── Geocoding via Nominatim (OpenStreetMap, free, no API key) ────
 const geocodeCache = new Map();
 

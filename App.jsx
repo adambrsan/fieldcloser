@@ -6,10 +6,11 @@ import {
 } from "./helpers.jsx";
 import LeadDetail from "./LeadDetail.jsx";
 import LeadList from "./LeadList.jsx";
-import { ScheduleView, ActivityView, RouteView, AddLeadModal, ImportModal } from "./Views.jsx";
+import { ScheduleView, ActivityView, RouteView, AddLeadModal, ImportModal, ProductionView } from "./Views.jsx";
 
 export default function App() {
   const [leads, setLeads] = useState([]);
+  const [allSales, setAllSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [sheetFilter, setSheetFilter] = useState("All");
@@ -34,6 +35,14 @@ export default function App() {
   const [showRoute, setShowRoute] = useState(false);
   const [startAddress, setStartAddress] = useState("");
   const [optimizing, setOptimizing] = useState(false);
+  const [weeklyGoal, setWeeklyGoal] = useState(() => {
+    const saved = localStorage.getItem("fieldcloser_goal");
+    return saved ? Number(saved) : 0;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("fieldcloser_goal", String(weeklyGoal));
+  }, [weeklyGoal]);
   const [showAddLead, setShowAddLead] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [newLead, setNewLead] = useState({ first_name: "", last_name: "", phone: "", address: "", city: "", state: "IL", lead_type: "Manual" });
@@ -77,16 +86,25 @@ export default function App() {
       supabase.from("notes").select("*").order("created_at", { ascending: false }),
       supabase.from("appointments").select("*"),
       supabase.from("reminders").select("*"),
-      supabase.from("sales").select("*"),
+      supabase.from("sales").select("*").order("sold_date", { ascending: false }),
     ]);
 
-    setLeads(prev => prev.map(lead => {
-      const notesList = (notesRes.data || []).filter(n => n.lead_id === lead.id);
-      const appointment = (apptRes.data || []).find(a => a.lead_id === lead.id) || null;
-      const reminder = (remRes.data || []).find(r => r.lead_id === lead.id) || null;
-      const sold = (salesRes.data || []).find(s => s.lead_id === lead.id) || null;
-      return { ...lead, notesList, appointment, reminder, sold };
-    }));
+    setLeads(prev => {
+      const updated = prev.map(lead => {
+        const notesList = (notesRes.data || []).filter(n => n.lead_id === lead.id);
+        const appointment = (apptRes.data || []).find(a => a.lead_id === lead.id) || null;
+        const reminder = (remRes.data || []).find(r => r.lead_id === lead.id) || null;
+        const sold = (salesRes.data || []).find(s => s.lead_id === lead.id) || null;
+        return { ...lead, notesList, appointment, reminder, sold };
+      });
+
+      // Build allSales with lead reference attached
+      const leadById = new Map(updated.map(l => [l.id, l]));
+      const salesWithLead = (salesRes.data || []).map(s => ({ ...s, lead: leadById.get(s.lead_id) || null }));
+      setAllSales(salesWithLead);
+
+      return updated;
+    });
   }
 
   const filtered = useMemo(() => {
@@ -305,6 +323,7 @@ export default function App() {
     const { error: updErr } = await supabase.from("leads").update({ status: "Sold", updated_at: new Date().toISOString() }).eq("id", selected.id);
     if (saleErr || updErr) { showToast("Error saving sale"); return; }
     updateLeadLocal({ ...selected, status: "Sold", sold: data });
+    setAllSales(prev => [{ ...data, lead: { ...selected, status: "Sold" } }, ...prev]);
     const action = `SOLD — ${soldForm.carrier} ${soldForm.coverage} @ ${soldForm.premium}`;
     pushLog({ name: `${selected.first_name} ${selected.last_name}`, num: selected.lead_num, action });
     logActivity(selected, action);
@@ -633,6 +652,13 @@ export default function App() {
             upcomingReminders={upcomingReminders}
             selectLead={selectLead}
           />
+        ) : tab === "production" ? (
+          <ProductionView
+            allSales={allSales}
+            goal={weeklyGoal}
+            setGoal={setWeeklyGoal}
+            selectLead={selectLead}
+          />
         ) : (
           <ActivityView todayStats={todayStats} log={log} />
         )}
@@ -657,6 +683,11 @@ export default function App() {
             className={`flex-1 flex flex-col items-center py-2.5 ${tab === "activity" ? "text-slate-800" : "text-gray-400"}`}>
             <span className="text-xl">📊</span>
             <span className="text-xs font-medium mt-0.5">Activity</span>
+          </button>
+          <button onClick={() => setTab("production")}
+            className={`flex-1 flex flex-col items-center py-2.5 ${tab === "production" ? "text-slate-800" : "text-gray-400"}`}>
+            <span className="text-xl">📈</span>
+            <span className="text-xs font-medium mt-0.5">Production</span>
           </button>
         </div>
       )}
