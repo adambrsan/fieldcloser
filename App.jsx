@@ -2,11 +2,12 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient.js";
 import {
   applyNHRules, downloadICS, exportLeadsCSV, parseCSV,
-  fmtDateTime, geocodeAddress, optimizeRouteOrder, haversineMiles
+  fmtDateTime, geocodeAddress, optimizeRouteOrder
 } from "./helpers.jsx";
 import LeadDetail from "./LeadDetail.jsx";
 import LeadList from "./LeadList.jsx";
-import { ScheduleView, ActivityView, RouteView, AddLeadModal, ImportModal, ProductionView, MileageView } from "./Views.jsx";
+import { ScheduleView, ActivityView, RouteView, AddLeadModal, ImportModal, ProductionView } from "./Views.jsx";
+import { PhoneScriptView } from "./PhoneScript.jsx";
 
 export default function App() {
   const [leads, setLeads] = useState([]);
@@ -43,109 +44,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("fieldcloser_goal", String(weeklyGoal));
   }, [weeklyGoal]);
-
-  // ── Mileage state ─────────────────────────────────────────────
-  const [trips, setTrips] = useState([]);
-  const [tracking, setTracking] = useState(false);
-  const [trackedMiles, setTrackedMiles] = useState(0);
-  const [manualMiles, setManualMiles] = useState("");
-  const [manualPurpose, setManualPurpose] = useState("");
-  const [gpsError, setGpsError] = useState("");
-  const watchIdRef = useState({ current: null })[0];
-  const lastPosRef = useState({ current: null })[0];
-  const tripStartRef = useState({ current: null })[0];
-
-  useEffect(() => {
-    loadTrips();
-  }, []);
-
-  async function loadTrips() {
-    const { data, error } = await supabase.from("trips").select("*").order("trip_date", { ascending: false }).order("created_at", { ascending: false });
-    if (!error) setTrips(data || []);
-  }
-
-  function onStartTrip() {
-    if (!navigator.geolocation) {
-      setGpsError("GPS not available on this device/browser");
-      return;
-    }
-    setGpsError("");
-    setTrackedMiles(0);
-    lastPosRef.current = null;
-    tripStartRef.current = new Date();
-    setTracking(true);
-
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        const current = { lat: latitude, lng: longitude };
-        if (lastPosRef.current) {
-          const d = haversineMiles(lastPosRef.current, current);
-          // Ignore GPS jitter under ~0.01 miles (~16m)
-          if (d > 0.01) {
-            setTrackedMiles(prev => prev + d);
-            lastPosRef.current = current;
-          }
-        } else {
-          lastPosRef.current = current;
-        }
-      },
-      (err) => {
-        setGpsError("GPS error: " + err.message);
-      },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
-    );
-  }
-
-  async function onStopTrip() {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-    setTracking(false);
-    if (trackedMiles < 0.05) {
-      showToast("Trip too short to save");
-      setTrackedMiles(0);
-      return;
-    }
-    const { data, error } = await supabase.from("trips").insert({
-      trip_date: new Date().toISOString().split("T")[0],
-      miles: Math.round(trackedMiles * 100) / 100,
-      purpose: "Field route",
-      source: "gps",
-      started_at: tripStartRef.current?.toISOString(),
-      ended_at: new Date().toISOString(),
-    }).select().single();
-    if (error) { showToast("Error saving trip"); return; }
-    setTrips(prev => [data, ...prev]);
-    pushLog({ name: "Trip logged", num: "", action: `🚙 ${data.miles} mi (GPS)` });
-    showToast(`Trip saved — ${data.miles} miles`);
-    setTrackedMiles(0);
-  }
-
-  async function onAddManualTrip() {
-    const miles = parseFloat(manualMiles);
-    if (!miles || miles <= 0) return;
-    const { data, error } = await supabase.from("trips").insert({
-      trip_date: new Date().toISOString().split("T")[0],
-      miles: Math.round(miles * 100) / 100,
-      purpose: manualPurpose || "Manual entry",
-      source: "manual",
-    }).select().single();
-    if (error) { showToast("Error saving trip"); return; }
-    setTrips(prev => [data, ...prev]);
-    pushLog({ name: "Trip logged", num: "", action: `🚙 ${data.miles} mi (manual)` });
-    showToast(`Trip saved — ${data.miles} miles`);
-    setManualMiles("");
-    setManualPurpose("");
-  }
-
-  async function onDeleteTrip(id) {
-    const { error } = await supabase.from("trips").delete().eq("id", id);
-    if (error) { showToast("Error deleting trip"); return; }
-    setTrips(prev => prev.filter(t => t.id !== id));
-  }
-
   const [showAddLead, setShowAddLead] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [newLead, setNewLead] = useState({ first_name: "", last_name: "", phone: "", address: "", city: "", state: "IL", lead_type: "Manual" });
@@ -762,19 +660,8 @@ export default function App() {
             setGoal={setWeeklyGoal}
             selectLead={selectLead}
           />
-        ) : tab === "mileage" ? (
-          <MileageView
-            trips={trips}
-            tracking={tracking}
-            trackedMiles={trackedMiles}
-            onStartTrip={onStartTrip}
-            onStopTrip={onStopTrip}
-            manualMiles={manualMiles} setManualMiles={setManualMiles}
-            manualPurpose={manualPurpose} setManualPurpose={setManualPurpose}
-            onAddManual={onAddManualTrip}
-            onDeleteTrip={onDeleteTrip}
-            gpsError={gpsError}
-          />
+        ) : tab === "phone" ? (
+          <PhoneScriptView showToast={showToast} />
         ) : (
           <ActivityView todayStats={todayStats} log={log} />
         )}
@@ -783,39 +670,35 @@ export default function App() {
       {!selected && !showRoute && (
         <div className="flex-shrink-0 border-t border-gray-200 bg-white flex" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
           <button onClick={() => setTab("leads")}
-            className={`flex-1 flex flex-col items-center py-2 ${tab === "leads" ? "text-slate-800" : "text-gray-400"}`}>
-            <span className="text-lg">📋</span>
-            <span className="text-[10px] font-medium mt-0.5">Leads</span>
+            className={`flex-1 flex flex-col items-center py-2.5 ${tab === "leads" ? "text-slate-800" : "text-gray-400"}`}>
+            <span className="text-xl">📋</span>
+            <span className="text-xs font-medium mt-0.5">Leads</span>
           </button>
           <button onClick={() => setTab("schedule")}
-            className={`flex-1 flex flex-col items-center py-2 relative ${tab === "schedule" ? "text-slate-800" : "text-gray-400"}`}>
-            <span className="text-lg">📅</span>
-            <span className="text-[10px] font-medium mt-0.5">Schedule</span>
+            className={`flex-1 flex flex-col items-center py-2.5 relative ${tab === "schedule" ? "text-slate-800" : "text-gray-400"}`}>
+            <span className="text-xl">📅</span>
+            <span className="text-xs font-medium mt-0.5">Schedule</span>
             {scheduleCount > 0 && (
-              <span className="absolute top-0.5 right-[20%] bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{scheduleCount}</span>
+              <span className="absolute top-1 right-[28%] bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">{scheduleCount}</span>
             )}
           </button>
           <button onClick={() => setTab("activity")}
-            className={`flex-1 flex flex-col items-center py-2 ${tab === "activity" ? "text-slate-800" : "text-gray-400"}`}>
-            <span className="text-lg">📊</span>
-            <span className="text-[10px] font-medium mt-0.5">Activity</span>
+            className={`flex-1 flex flex-col items-center py-2.5 ${tab === "activity" ? "text-slate-800" : "text-gray-400"}`}>
+            <span className="text-xl">📊</span>
+            <span className="text-xs font-medium mt-0.5">Activity</span>
           </button>
           <button onClick={() => setTab("production")}
-            className={`flex-1 flex flex-col items-center py-2 ${tab === "production" ? "text-slate-800" : "text-gray-400"}`}>
-            <span className="text-lg">📈</span>
-            <span className="text-[10px] font-medium mt-0.5">Production</span>
+            className={`flex-1 flex flex-col items-center py-2.5 ${tab === "production" ? "text-slate-800" : "text-gray-400"}`}>
+            <span className="text-xl">📈</span>
+            <span className="text-xs font-medium mt-0.5">Production</span>
           </button>
-          <button onClick={() => setTab("mileage")}
-            className={`flex-1 flex flex-col items-center py-2 relative ${tab === "mileage" ? "text-slate-800" : "text-gray-400"}`}>
-            <span className="text-lg">🚙</span>
-            <span className="text-[10px] font-medium mt-0.5">Mileage</span>
-            {tracking && (
-              <span className="absolute top-1 right-[22%] w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-            )}
+          <button onClick={() => setTab("phone")}
+            className={`flex-1 flex flex-col items-center py-2.5 ${tab === "phone" ? "text-slate-800" : "text-gray-400"}`}>
+            <span className="text-xl">📞</span>
+            <span className="text-xs font-medium mt-0.5">Script</span>
           </button>
         </div>
       )}
-
 
       {toast && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-sm px-5 py-3 rounded-xl shadow-xl z-50 max-w-sm text-center">
